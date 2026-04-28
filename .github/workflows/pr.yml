@@ -1,0 +1,42 @@
+name: Build to test PR
+
+on:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build binary
+        run: cargo build --release
+      - name: Create tarball
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then
+            ARCH_NAME="x86_64"
+          elif [ "$ARCH" = "aarch64" ]; then
+            ARCH_NAME="aarch64"
+          fi
+          mkdir -p reaction-time-test-linux-${ARCH_NAME}
+          cp target/release/reaction-time-test reaction-time-test-linux-${ARCH_NAME}/
+          cp LICENSE reaction-time-test-linux-${ARCH_NAME}/ 2>/dev/null || true
+          tar -czf reaction-time-test-linux-${ARCH_NAME}.tar.gz -C reaction-time-test-linux-${ARCH_NAME} .
+      - name: Generate checksum
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then
+            ARCH_NAME="x86_64"
+          elif [ "$ARCH" = "aarch64" ]; then
+            ARCH_NAME="aarch64"
+          fi
+          sha256sum reaction-time-test-linux-${ARCH_NAME}.tar.gz > reaction-time-test-linux-${ARCH_NAME}.sha256
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: reaction-time-test-linux
+          path: |
+            reaction-time-test-linux-*.tar.gz
+            reaction-time-test-linux-*.sha256
