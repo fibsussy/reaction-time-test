@@ -7,6 +7,7 @@ on:
 jobs:
   check-skip:
     runs-on: ubuntu-latest
+    container: archlinux:latest
     outputs:
       should_skip: ${{ steps.check.outputs.skip }}
     steps:
@@ -24,16 +25,20 @@ jobs:
     needs: [check-skip]
     if: needs.check-skip.outputs.should_skip == 'false'
     runs-on: ubuntu-latest
+    container: archlinux:latest
     outputs:
       new_version: ${{ steps.bump.outputs.new_version }}
       old_version: ${{ steps.bump.outputs.old_version }}
     steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm git
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Determine version bump
         id: bump
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           OLD_VERSION=${LAST_TAG#v}
           IFS='.' read -r MAJOR MINOR PATCH <<< "$OLD_VERSION"
@@ -61,12 +66,13 @@ jobs:
   build:
     needs: [version]
     runs-on: ubuntu-latest
+    container: archlinux:latest
     steps:
+      - name: Install system dependencies
+        run: pacman -Syu --noconfirm base-devel git rust
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
       - name: Build binary
         run: cargo build --release
       - name: Determine architecture
@@ -84,35 +90,36 @@ jobs:
           VERSION=${{ needs.version.outputs.new_version }}
           sed -i "s/pkgver=.*/pkgver=$VERSION/" PKGBUILD
           sed -i "s/pkgver=.*/pkgver=$VERSION/" aur/PKGBUILD
-      - name: Update Cargo.toml version
-        run: |
-          VERSION=${{ needs.version.outputs.new_version }}
-          sed -i "s/^version = .*/version = \"$VERSION\"/" Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
       - name: Create tarball
         run: |
           ARCH_NAME=${{ steps.arch.outputs.arch_name }}
-          mkdir -p reaction-time-test-linux-${ARCH_NAME}
-          cp target/release/reaction-time-test reaction-time-test-linux-${ARCH_NAME}/
-          cp LICENSE reaction-time-test-linux-${ARCH_NAME}/ 2>/dev/null || true
-          tar -czf reaction-time-test-linux-${ARCH_NAME}.tar.gz -C reaction-time-test-linux-${ARCH_NAME} .
-          sha256sum reaction-time-test-linux-${ARCH_NAME}.tar.gz > reaction-time-test-linux-${ARCH_NAME}.sha256
+          VERSION=${{ needs.version.outputs.new_version }}
+          mkdir -p reaction-time-test-${VERSION}-${ARCH_NAME}/
+          cp target/release/reaction-time-test reaction-time-test-${VERSION}-${ARCH_NAME}/
+          cp LICENSE reaction-time-test-${VERSION}-${ARCH_NAME}/ 2>/dev/null || true
+          tar -czf reaction-time-test-${VERSION}-${ARCH_NAME}.tar.gz -C reaction-time-test-${VERSION}-${ARCH_NAME} .
+          sha256sum reaction-time-test-${VERSION}-${ARCH_NAME}.tar.gz > reaction-time-test-${VERSION}-${ARCH_NAME}.sha256
       - name: Upload build artifacts
         uses: actions/upload-artifact@v6
         with:
           name: build-output
           path: |
-            Cargo.toml
             PKGBUILD
             aur/
-            reaction-time-test-linux-*.tar.gz
-            reaction-time-test-linux-*.sha256
+            Cargo.toml
+            reaction-time-test-*.tar.gz
+            reaction-time-test-*.sha256
 
   release:
     needs: [version, build]
     runs-on: ubuntu-latest
+    container: archlinux:latest
     permissions:
       contents: write
     steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm git github-cli
       - uses: actions/checkout@v5
         with:
           ref: main
@@ -123,6 +130,7 @@ jobs:
           path: .
       - name: Configure git
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config user.name "GitHub Action"
           git config user.email "action@github.com"
           gh auth setup-git
@@ -131,7 +139,7 @@ jobs:
       - name: Commit version bump and tag
         run: |
           VERSION=${{ needs.version.outputs.new_version }}
-          git add Cargo.toml PKGBUILD aur/
+          git add PKGBUILD aur/ Cargo.toml
           git commit -m "chore: bump version to v${VERSION}" || echo "No changes to commit"
           git tag "v${VERSION}" -f
           git push origin main
@@ -151,8 +159,8 @@ jobs:
           gh release create "v${VERSION}" \
             --title "v${VERSION}" \
             --notes "Release v${VERSION}" \
-            reaction-time-test-linux-${ARCH_NAME}.tar.gz \
-            reaction-time-test-linux-${ARCH_NAME}.sha256
+            reaction-time-test-${VERSION}-${ARCH_NAME}.tar.gz \
+            reaction-time-test-${VERSION}-${ARCH_NAME}.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

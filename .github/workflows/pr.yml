@@ -6,10 +6,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container: archlinux:latest
     steps:
+      - name: Install system dependencies
+        run: pacman -Syu --noconfirm base-devel git rust
       - uses: actions/checkout@v5
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
       - name: Build binary
         run: cargo build --release
       - name: Create tarball
@@ -22,7 +23,7 @@ jobs:
           fi
           mkdir -p reaction-time-test-linux-${ARCH_NAME}
           cp target/release/reaction-time-test reaction-time-test-linux-${ARCH_NAME}/
-          cp LICENSE reaction-time-test-linux-${ARCH_NAME}/ 2>/dev/null || true
+          cp LICENSE reaction-time-test-linux-${ARCH_NAME}/
           tar -czf reaction-time-test-linux-${ARCH_NAME}.tar.gz -C reaction-time-test-linux-${ARCH_NAME} .
       - name: Generate checksum
         run: |
